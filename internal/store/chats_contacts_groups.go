@@ -259,6 +259,43 @@ func (d *DB) RemoveAlias(jid string) error {
 	return err
 }
 
+// AliasEntry represents a single alias→JID mapping.
+type AliasEntry struct {
+	Alias     string `json:"alias"`
+	JID       string `json:"jid"`
+	Notes     string `json:"notes,omitempty"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
+// ListAliases returns all stored aliases ordered by alias name.
+func (d *DB) ListAliases() ([]AliasEntry, error) {
+	rows, err := d.sql.Query(`SELECT alias, jid, COALESCE(notes,''), updated_at FROM contact_aliases ORDER BY LOWER(alias)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AliasEntry
+	for rows.Next() {
+		var e AliasEntry
+		if err := rows.Scan(&e.Alias, &e.JID, &e.Notes, &e.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ResolveAlias looks up an alias and returns the corresponding JID.
+// Returns empty string if not found.
+func (d *DB) ResolveAlias(alias string) (string, error) {
+	var jid string
+	err := d.sql.QueryRow(`SELECT jid FROM contact_aliases WHERE LOWER(alias) = LOWER(?)`, alias).Scan(&jid)
+	if err != nil {
+		return "", nil // not found is not an error
+	}
+	return jid, nil
+}
+
 func (d *DB) AddTag(jid, tag string) error {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {

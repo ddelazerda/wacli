@@ -68,14 +68,10 @@ func newContactsSearchCmd(flags *rootFlags) *cobra.Command {
 }
 
 func newContactsShowCmd(flags *rootFlags) *cobra.Command {
-	var jid string
 	cmd := &cobra.Command{
 		Use:   "show",
 		Short: "Show one contact",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(jid) == "" {
-				return fmt.Errorf("--jid is required")
-			}
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
@@ -84,6 +80,11 @@ func newContactsShowCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			defer closeApp(a, lk)
+
+			jid, err := requireJIDOrAlias(cmd, a.DB())
+			if err != nil {
+				return err
+			}
 
 			c, err := a.DB().GetContact(jid)
 			if err != nil {
@@ -110,7 +111,8 @@ func newContactsShowCmd(flags *rootFlags) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&jid, "jid", "", "contact JID")
+	cmd.Flags().String("jid", "", "contact JID")
+	cmd.Flags().String("alias", "", "contact alias (alternative to --jid)")
 	return cmd
 }
 
@@ -159,11 +161,72 @@ func newContactsRefreshCmd(flags *rootFlags) *cobra.Command {
 	return cmd
 }
 
+// requireJIDOrAlias reads --jid and --alias from the command flags, enforces
+// mutual exclusivity, and resolves --alias to a JID via the database.
+// Returns the resolved JID.
+func requireJIDOrAlias(cmd *cobra.Command, db interface {
+	ResolveAlias(string) (string, error)
+}) (string, error) {
+	jid, _ := cmd.Flags().GetString("jid")
+	alias, _ := cmd.Flags().GetString("alias")
+	jid = strings.TrimSpace(jid)
+	alias = strings.TrimSpace(alias)
+
+	if jid != "" && alias != "" {
+		return "", fmt.Errorf("--jid and --alias are mutually exclusive")
+	}
+	if jid == "" && alias == "" {
+		return "", fmt.Errorf("--jid or --alias is required")
+	}
+	if jid != "" {
+		return jid, nil
+	}
+	resolved, err := db.ResolveAlias(alias)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve alias %q: %w", alias, err)
+	}
+	if resolved == "" {
+		return "", fmt.Errorf("alias %q not found", alias)
+	}
+	return resolved, nil
+}
+
 func newContactsAliasCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "alias",
 		Short: "Manage local aliases",
 	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "List all aliases",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := withTimeout(context.Background(), flags)
+			defer cancel()
+			a, lk, err := newApp(ctx, flags, false, false)
+			if err != nil {
+				return err
+			}
+			defer closeApp(a, lk)
+			entries, err := a.DB().ListAliases()
+			if err != nil {
+				return err
+			}
+			if flags.asJSON {
+				return out.WriteJSON(os.Stdout, entries)
+			}
+			if len(entries) == 0 {
+				fmt.Fprintln(os.Stdout, "No aliases configured.")
+				return nil
+			}
+			w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+			fmt.Fprintln(w, "ALIAS\tJID")
+			for _, e := range entries {
+				fmt.Fprintf(w, "%s\t%s\n", e.Alias, e.JID)
+			}
+			_ = w.Flush()
+			return nil
+		},
+	})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "set",
 		Short: "Set alias",
@@ -195,8 +258,14 @@ func newContactsAliasCmd(flags *rootFlags) *cobra.Command {
 		Short: "Remove alias",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			jid, _ := cmd.Flags().GetString("jid")
-			if strings.TrimSpace(jid) == "" {
-				return fmt.Errorf("--jid is required")
+			alias, _ := cmd.Flags().GetString("alias")
+			jid = strings.TrimSpace(jid)
+			alias = strings.TrimSpace(alias)
+			if jid != "" && alias != "" {
+				return fmt.Errorf("--jid and --alias are mutually exclusive")
+			}
+			if jid == "" && alias == "" {
+				return fmt.Errorf("--jid or --alias is required")
 			}
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
@@ -205,11 +274,22 @@ func newContactsAliasCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			defer closeApp(a, lk)
-			if err := a.DB().RemoveAlias(jid); err != nil {
+			target := jid
+			if target == "" {
+				resolved, err := a.DB().ResolveAlias(alias)
+				if err != nil {
+					return fmt.Errorf("failed to resolve alias %q: %w", alias, err)
+				}
+				if resolved == "" {
+					return fmt.Errorf("alias %q not found", alias)
+				}
+				target = resolved
+			}
+			if err := a.DB().RemoveAlias(target); err != nil {
 				return err
 			}
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": jid, "removed": true})
+				return out.WriteJSON(os.Stdout, map[string]any{"jid": target, "removed": true})
 			}
 			fmt.Fprintln(os.Stdout, "OK")
 			return nil
@@ -230,10 +310,9 @@ func newContactsTagsCmd(flags *rootFlags) *cobra.Command {
 		Use:   "add",
 		Short: "Add tag",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			jid, _ := cmd.Flags().GetString("jid")
 			tag, _ := cmd.Flags().GetString("tag")
-			if strings.TrimSpace(jid) == "" || strings.TrimSpace(tag) == "" {
-				return fmt.Errorf("--jid and --tag are required")
+			if strings.TrimSpace(tag) == "" {
+				return fmt.Errorf("--tag is required")
 			}
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
@@ -242,6 +321,10 @@ func newContactsTagsCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			defer closeApp(a, lk)
+			jid, err := requireJIDOrAlias(cmd, a.DB())
+			if err != nil {
+				return err
+			}
 			if err := a.DB().AddTag(jid, tag); err != nil {
 				return err
 			}
@@ -256,10 +339,9 @@ func newContactsTagsCmd(flags *rootFlags) *cobra.Command {
 		Use:   "rm",
 		Short: "Remove tag",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			jid, _ := cmd.Flags().GetString("jid")
 			tag, _ := cmd.Flags().GetString("tag")
-			if strings.TrimSpace(jid) == "" || strings.TrimSpace(tag) == "" {
-				return fmt.Errorf("--jid and --tag are required")
+			if strings.TrimSpace(tag) == "" {
+				return fmt.Errorf("--tag is required")
 			}
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
@@ -268,6 +350,10 @@ func newContactsTagsCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			defer closeApp(a, lk)
+			jid, err := requireJIDOrAlias(cmd, a.DB())
+			if err != nil {
+				return err
+			}
 			if err := a.DB().RemoveTag(jid, tag); err != nil {
 				return err
 			}
@@ -280,6 +366,7 @@ func newContactsTagsCmd(flags *rootFlags) *cobra.Command {
 	})
 
 	_ = cmd.PersistentFlags().String("jid", "", "contact JID")
+	_ = cmd.PersistentFlags().String("alias", "", "contact alias (alternative to --jid)")
 	_ = cmd.PersistentFlags().String("tag", "", "tag")
 	return cmd
 }
