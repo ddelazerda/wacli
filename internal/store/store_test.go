@@ -239,6 +239,91 @@ func TestContactsAliasTagsAndSearch(t *testing.T) {
 	}
 }
 
+func TestListAliases(t *testing.T) {
+	db := openTestDB(t)
+
+	// Empty list when no aliases exist.
+	entries, err := db.ListAliases()
+	if err != nil {
+		t.Fatalf("ListAliases empty: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries, got %d", len(entries))
+	}
+
+	// Create contacts and aliases.
+	jid1 := "111@s.whatsapp.net"
+	jid2 := "222@s.whatsapp.net"
+	_ = db.UpsertContact(jid1, "111", "", "", "", "")
+	_ = db.UpsertContact(jid2, "222", "", "", "", "")
+	if err := db.SetAlias(jid1, "wife"); err != nil {
+		t.Fatalf("SetAlias: %v", err)
+	}
+	if err := db.SetAlias(jid2, "bob"); err != nil {
+		t.Fatalf("SetAlias: %v", err)
+	}
+
+	entries, err = db.ListAliases()
+	if err != nil {
+		t.Fatalf("ListAliases: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	// Should be ordered alphabetically by alias.
+	if entries[0].Alias != "bob" || entries[0].JID != jid2 {
+		t.Fatalf("expected first entry bob, got %+v", entries[0])
+	}
+	if entries[1].Alias != "wife" || entries[1].JID != jid1 {
+		t.Fatalf("expected second entry wife, got %+v", entries[1])
+	}
+
+	// After removing one alias, list should reflect it.
+	_ = db.RemoveAlias(jid2)
+	entries, err = db.ListAliases()
+	if err != nil {
+		t.Fatalf("ListAliases after remove: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Alias != "wife" {
+		t.Fatalf("expected 1 entry (wife), got %+v", entries)
+	}
+}
+
+func TestResolveAlias(t *testing.T) {
+	db := openTestDB(t)
+
+	jid := "111@s.whatsapp.net"
+	_ = db.UpsertContact(jid, "111", "", "", "", "")
+	_ = db.SetAlias(jid, "wife")
+
+	// Resolve existing alias.
+	got, err := db.ResolveAlias("wife")
+	if err != nil {
+		t.Fatalf("ResolveAlias: %v", err)
+	}
+	if got != jid {
+		t.Fatalf("expected %s, got %s", jid, got)
+	}
+
+	// Case-insensitive lookup.
+	got, err = db.ResolveAlias("Wife")
+	if err != nil {
+		t.Fatalf("ResolveAlias case: %v", err)
+	}
+	if got != jid {
+		t.Fatalf("expected %s for case-insensitive lookup, got %s", jid, got)
+	}
+
+	// Non-existent alias returns empty string, no error.
+	got, err = db.ResolveAlias("nobody")
+	if err != nil {
+		t.Fatalf("ResolveAlias unknown: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("expected empty for unknown alias, got %s", got)
+	}
+}
+
 func TestCountMessagesAndOldestMessageInfo(t *testing.T) {
 	db := openTestDB(t)
 
