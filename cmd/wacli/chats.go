@@ -64,14 +64,10 @@ func newChatsListCmd(flags *rootFlags) *cobra.Command {
 }
 
 func newChatsShowCmd(flags *rootFlags) *cobra.Command {
-	var jid string
 	cmd := &cobra.Command{
 		Use:   "show",
 		Short: "Show one chat",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if jid == "" {
-				return fmt.Errorf("--jid is required")
-			}
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
@@ -80,6 +76,11 @@ func newChatsShowCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			defer closeApp(a, lk)
+
+			jid, err := requireJIDOrAlias(cmd, a.DB())
+			if err != nil {
+				return err
+			}
 
 			c, err := a.DB().GetChat(jid)
 			if err != nil {
@@ -92,6 +93,7 @@ func newChatsShowCmd(flags *rootFlags) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&jid, "jid", "", "chat JID")
+	cmd.Flags().String("jid", "", "chat JID")
+	cmd.Flags().String("alias", "", "contact alias (alternative to --jid)")
 	return cmd
 }
