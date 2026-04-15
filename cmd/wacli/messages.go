@@ -44,6 +44,14 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
+			if chat != "" {
+				resolved, err := resolveJIDValue(a.DB(), chat)
+				if err != nil {
+					return err
+				}
+				chat = resolved
+			}
+
 			var after *time.Time
 			var before *time.Time
 			if afterStr != "" {
@@ -137,6 +145,21 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			defer closeApp(a, lk)
+
+			if chat != "" {
+				resolved, err := resolveJIDValue(a.DB(), chat)
+				if err != nil {
+					return err
+				}
+				chat = resolved
+			}
+			if from != "" {
+				resolved, err := resolveJIDValue(a.DB(), from)
+				if err != nil {
+					return err
+				}
+				from = resolved
+			}
 
 			var after *time.Time
 			var before *time.Time
@@ -239,6 +262,12 @@ func newMessagesShowCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
+			resolved, err := resolveJIDValue(a.DB(), chat)
+			if err != nil {
+				return err
+			}
+			chat = resolved
+
 			m, err := a.DB().GetMessage(chat, id)
 			if err != nil {
 				return err
@@ -294,6 +323,12 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			defer closeApp(a, lk)
+
+			resolved, err := resolveJIDValue(a.DB(), chat)
+			if err != nil {
+				return err
+			}
+			chat = resolved
 
 			msgs, err := a.DB().MessageContext(chat, id, before, after)
 			if err != nil {

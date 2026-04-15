@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steipete/wacli/internal/store"
 	"golang.org/x/term"
 )
 
@@ -25,6 +26,22 @@ func parseTime(s string) (time.Time, error) {
 		return t, nil
 	}
 	return time.Time{}, fmt.Errorf("unsupported time format %q (use RFC3339 or YYYY-MM-DD)", s)
+}
+
+// resolveJIDValue resolves a value that may be either a JID (contains "@") or
+// an alias. Used for --chat, --to, and --from flags.
+func resolveJIDValue(db *store.DB, value string) (string, error) {
+	if strings.Contains(value, "@") {
+		return value, nil
+	}
+	jid, err := db.ResolveAlias(value)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve alias %q: %w", value, err)
+	}
+	if jid == "" {
+		return "", fmt.Errorf("alias %q not found (expected a JID containing '@' or a known alias)", value)
+	}
+	return jid, nil
 }
 
 func truncate(s string, max int) string {

@@ -43,6 +43,12 @@ func newHistoryBackfillCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
+			resolved, err := resolveJIDValue(a.DB(), chat)
+			if err != nil {
+				return err
+			}
+			chat = resolved
+
 			res, err := a.BackfillHistory(ctx, app.BackfillOptions{
 				ChatJID:        chat,
 				Count:          count,

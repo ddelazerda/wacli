@@ -41,6 +41,12 @@ func newMediaDownloadCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
+			resolved, err := resolveJIDValue(a.DB(), chat)
+			if err != nil {
+				return err
+			}
+			chat = resolved
+
 			if err := a.EnsureAuthed(); err != nil {
 				return err
 			}

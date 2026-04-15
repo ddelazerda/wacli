@@ -41,7 +41,11 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			toJID, err := wa.ParseUserOrJID(to)
+			resolved, err := resolveJIDValue(a.DB(), to)
+			if err != nil {
+				return err
+			}
+			toJID, err := wa.ParseUserOrJID(resolved)
 			if err != nil {
 				return err
 			}
